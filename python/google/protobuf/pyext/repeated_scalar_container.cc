@@ -517,6 +517,184 @@ PyObject* Extend(RepeatedScalarContainer* self, PyObject* value) {
   Py_RETURN_NONE;
 }
 
+static PyObject* IndexMethod(
+    PyObject* pself, PyObject* args, PyObject* kwargs) {
+  static char *keywords[] = {"start", "stop", NULL};
+  
+  RepeatedScalarContainer* self =
+      reinterpret_cast<RepeatedScalarContainer*>(pself);
+
+  PyObject* value;
+  Py_ssize_t start = 0;
+  PyObject* stop = NULL;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|nO", keywords, &value,
+				   &start, &stop)) {
+    return NULL;
+  }
+
+  const Message* message = self->message;
+  const FieldDescriptor* field_descriptor = self->parent_field_descriptor;
+  const Reflection* reflection = message->GetReflection();
+  int field_size = reflection->FieldSize(*message, field_descriptor);
+  Py_ssize_t index;
+  if (start < -field_size) {
+    index = 0;
+  } else if (start < 0) {
+    index = start + field_size;
+  } else {
+    index = start;
+  }
+  Py_ssize_t limit;
+  if (stop == NULL || stop == Py_None) {
+    limit = field_size;
+  } else {
+    limit = PyLong_AsSsize_t(stop);
+    if (limit == -1 && PyErr_Occurred()) {
+      return NULL;
+    } else if (limit < 0) {
+      limit += field_size;
+    }
+  }
+
+  switch (field_descriptor->cpp_type()) {
+    case FieldDescriptor::CPPTYPE_INT32: {
+      const long sought = PyLong_AsLong(value);
+      if (sought == -1 && PyErr_Occurred()) {
+        return NULL;
+      }
+      for (; index < limit; index++) {
+	int32 candidate = reflection->GetRepeatedInt32(
+	    *message, field_descriptor, index);
+	if (candidate == sought) {
+          return PyLong_FromSsize_t(index);
+	}
+      }
+      PyErr_Format(PyExc_ValueError, "value %ld not found", sought);
+      return NULL;
+    }
+    case FieldDescriptor::CPPTYPE_INT64: {
+      const long long sought = PyLong_AsLongLong(value);
+      if (sought == -1 && PyErr_Occurred()) {
+	return NULL;
+      }
+      for (; index < limit; index++) {
+        int64 candidate = reflection->GetRepeatedInt64(
+	    *message, field_descriptor, index);
+	if (candidate == sought) {
+	  return PyLong_FromSsize_t(index);
+	}
+      }
+      PyErr_Format(PyExc_ValueError, "value %lld not found", sought);
+      return NULL;
+    }
+    case FieldDescriptor::CPPTYPE_UINT32: {
+      const unsigned long sought = PyLong_AsUnsignedLong(value);
+      if (sought == -1 && PyErr_Occurred()) {
+        return NULL;
+      }
+      for (; index < limit; index++) {
+        const uint32 candidate = reflection->GetRepeatedUInt32(
+	    *message, field_descriptor, index);
+	if (candidate == sought) {
+          return PyLong_FromSsize_t(index);
+	}
+      }
+      PyErr_Format(PyExc_ValueError, "value %lu not found", sought);
+      return NULL;
+    }
+    case FieldDescriptor::CPPTYPE_UINT64: {
+      const unsigned long long sought = PyLong_AsUnsignedLongLong(value);
+      if (sought == -1 && PyErr_Occurred()) {
+        return NULL;
+      }
+      for (; index < limit; index++) {
+        const uint64 candidate = reflection->GetRepeatedUInt64(
+	    *message, field_descriptor, index);
+	if (candidate == sought) {
+	  return PyLong_FromSsize_t(index);
+	}
+      }
+      PyErr_Format(PyExc_ValueError, "value %llu not found", sought);
+      return NULL;
+    }
+    case FieldDescriptor::CPPTYPE_FLOAT: {
+      const float sought = PyFloat_AsDouble(value);
+      if (sought == -1.0 && PyErr_Occurred()) {
+	return NULL;
+      }
+      for (; index < limit; index++) {
+        const float candidate = reflection->GetRepeatedFloat(
+	    *message, field_descriptor, index);
+	if (candidate == sought) {
+	  return PyLong_FromSsize_t(index);
+	}
+      }
+      PyErr_Format(PyExc_ValueError, "value %f not found", sought);
+      return NULL;
+    }
+    case FieldDescriptor::CPPTYPE_DOUBLE: {
+      const double sought = PyFloat_AsDouble(value);
+      if (sought == -1.0 && PyErr_Occurred()) {
+	return NULL;
+      }
+      for (; index < limit; index++) {
+	const double candidate = reflection->GetRepeatedDouble(
+	    *message, field_descriptor, index);
+	if (candidate == sought) {
+	  return PyLong_FromSsize_t(index);
+	}
+      }
+      PyErr_Format(PyExc_ValueError, "value %f not found", sought);
+      return NULL;
+    }
+    case FieldDescriptor::CPPTYPE_BOOL: {
+      const int integer_truth = PyObject_IsTrue(value);
+      if (integer_truth == -1) {
+	return NULL;
+      }
+      const bool sought = integer_truth == 1;
+      for (; index < limit; index++) {
+        const bool candidate = reflection->GetRepeatedBool(
+	    *message, field_descriptor, index);
+	if (candidate == sought) {
+	  return PyLong_FromSsize_t(index);
+	}
+      }
+      PyErr_Format(
+          PyExc_ValueError, "value %s not found", sought ? "true" : "false");
+      return NULL;
+    }
+    case FieldDescriptor::CPPTYPE_ENUM: {
+      const unsigned long long sought = PyLong_AsUnsignedLongLong(value);
+      if (sought == -1 && PyErr_Occurred()) {
+	return NULL;
+      }
+      for (; index < limit; index++) {
+        const EnumValueDescriptor* candidate =
+            message->GetReflection()->GetRepeatedEnum(
+	        *message, field_descriptor, index);
+	if (candidate->number() == sought) {
+          return PyLong_FromSsize_t(index);
+	}
+      }
+      PyErr_Format(PyExc_ValueError, "value %llu not found", sought);
+      return NULL;
+    }
+    case FieldDescriptor::CPPTYPE_STRING: {
+      // TODO(nathaniel): Come back to this after writing Python-level
+      // tests for both strings and bytes.
+      PyErr_Format(PyExc_NotImplementedError, "TODO(nathaniel)!");
+      return NULL;
+    }
+    default:
+      PyErr_Format(
+          PyExc_SystemError,
+	  "Getting index from a repeated field of unknown type %d",
+	  field_descriptor->cpp_type());
+      return NULL;
+  }
+}
+ 
 static PyObject* Insert(PyObject* pself, PyObject* args) {
   RepeatedScalarContainer* self =
       reinterpret_cast<RepeatedScalarContainer*>(pself);
@@ -772,6 +950,8 @@ static PyMethodDef Methods[] = {
     "Appends an object to the repeated container." },
   { "extend", ExtendMethod, METH_O,
     "Appends objects to the repeated container." },
+  { "index", (PyCFunction)IndexMethod, METH_VARARGS | METH_KEYWORDS,
+    "Returns first index of value." },
   { "insert", Insert, METH_VARARGS,
     "Inserts an object at the specified position in the container." },
   { "pop", Pop, METH_VARARGS,

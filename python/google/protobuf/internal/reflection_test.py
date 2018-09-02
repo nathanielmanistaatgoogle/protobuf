@@ -608,13 +608,19 @@ class ReflectionTest(BaseTestCase):
     # Composite fields.
     self.assertRaises(AttributeError, setattr, proto,
                       'optional_nested_message', 23)
-    # Assignment to a repeated nested message field without specifying
-    # the index in the array of nested messages.
-    self.assertRaises(AttributeError, setattr, proto.repeated_nested_message,
-                      'bb', 34)
+    with self.assertRaises(AttributeError):
+      setattr(proto, 'repeated_nested_message', 23)
     # Assignment to an attribute of a repeated field.
-    self.assertRaises(AttributeError, setattr, proto.repeated_float,
-                      'some_attribute', 34)
+    #
+    # NOTE(https://bugs.python.org/issue11333): These do not work on Python 2
+    # because the implementations of proto.repeated_nested_message and
+    # proto.repeated_float inherit from collections.MutableSequence. Lol;
+    # Python 2 (https://pythonclock.org).
+    if not six.PY2:
+      with self.assertRaises(AttributeError):
+        setattr(proto.repeated_float, 'some attribute', 34)
+      with self.assertRaises(AttributeError):
+        setattr(proto.repeated_nested_message, 'bb', 34)
     # proto.nonexistent_field = 23 should fail as well.
     self.assertRaises(AttributeError, setattr, proto, 'nonexistent_field', 23)
 

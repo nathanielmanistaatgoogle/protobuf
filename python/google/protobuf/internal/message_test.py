@@ -42,9 +42,6 @@ sense to call this a test of the "message" module, which only declares an
 abstract interface.
 """
 
-__author__ = 'gps@google.com (Gregory P. Smith)'
-
-
 import collections
 import copy
 import math
@@ -636,37 +633,450 @@ class MessageTest(BaseTestCase):
     m2.repeated_int32.append(0)
     m2.repeated_int32.append(1)
     m2.repeated_int32.append(2)
-    m1.repeated_nested_message.add().bb = 1
-    m1.repeated_nested_message.add().bb = 2
-    m1.repeated_nested_message.add().bb = 3
-    m2.repeated_nested_message.add().bb = 1
-    m2.repeated_nested_message.add().bb = 2
-    m2.repeated_nested_message.add().bb = 3
+    m1.repeated_nested_message.add(bb=1)
+    m1.repeated_nested_message.add(bb=2)
+    m1.repeated_nested_message.add(bb=3)
+    m2.repeated_nested_message.add(bb=1)
+    m2.repeated_nested_message.add(bb=2)
+    m2.repeated_nested_message.add(bb=3)
 
-    if sys.version_info >= (3,): return  # No cmp() in PY3.
+    # Because RepeatedScalarFieldMutableSequence implements
+    # collections.abc.MutableSequence, m1.repeated_int32 must be comparable to
+    # any other MutableSequence[int].
+    self.assertSequenceEqual([0, 1, 2,], m1.repeated_int32)
+    self.assertEqual([0, 1, 2,], m1.repeated_int32)
+    self.assertSequenceEqual((0, 1, 2,), m1.repeated_int32)
+    self.assertSequenceEqual(m2.repeated_int32, m1.repeated_int32)
+    self.assertNotEqual([1, 2, 3,], m1.repeated_int32)
+    self.assertNotEqual((1, 2, 3,), m1.repeated_int32)
 
-    # These comparisons should not raise errors.
-    _ = m1 < m2
-    _ = m1.repeated_nested_message < m2.repeated_nested_message
+    # Because RepeatedCompositeFieldMutableSequence implements
+    # collections.abc.MutableSequence, m1.repeated_nested_message must be
+    # comparable to any other
+    # MutableSequence[message_module.TestAllTypes.NestedMessage].
+    self.assertSequenceEqual(
+        m2.repeated_nested_message, m1.repeated_nested_message)
+    self.assertSequenceEqual(
+        list(m2.repeated_nested_message), m1.repeated_nested_message)
+    self.assertEqual(
+        list(m2.repeated_nested_message), m1.repeated_nested_message)
+    self.assertSequenceEqual(
+        tuple(m2.repeated_nested_message), m1.repeated_nested_message)
+    self.assertNotEqual(
+        list(m2.repeated_nested_message) * 2, m1.repeated_nested_message)
 
-    # Make sure cmp always works. If it wasn't defined, these would be
-    # id() comparisons and would all fail.
-    self.assertEqual(cmp(m1, m2), 0)
-    self.assertEqual(cmp(m1.repeated_int32, m2.repeated_int32), 0)
-    self.assertEqual(cmp(m1.repeated_int32, [0, 1, 2]), 0)
-    self.assertEqual(cmp(m1.repeated_nested_message,
-                         m2.repeated_nested_message), 0)
-    with self.assertRaises(TypeError):
-      # Can't compare repeated composite containers to lists.
-      cmp(m1.repeated_nested_message, m2.repeated_nested_message[:])
+    if six.PY2:  # No cmp() in PY3.
+      # These comparisons should not raise errors.
+      _ = m1 < m2
+      _ = m1.repeated_nested_message < m2.repeated_nested_message
+
+      # Make sure cmp always works. If it wasn't defined, these would be
+      # id() comparisons and would all fail.
+      self.assertEqual(cmp(m1, m2), 0)
+      self.assertEqual(cmp(m1.repeated_int32, m2.repeated_int32), 0)
+      self.assertEqual(cmp(m1.repeated_int32, [0, 1, 2]), 0)
+      self.assertEqual(cmp(m1.repeated_nested_message,
+                           m2.repeated_nested_message), 0)
 
     # TODO(anuraag): Implement extensiondict comparison in C++ and then add test
 
+  def testRepeatedFieldsAreIterables(self, message_module):
+    message = message_module.TestAllTypes(
+        repeated_int32=(4,5,6,),
+        repeated_nested_message=(
+            message_module.TestAllTypes.NestedMessage(bb=17),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=19),
+        )
+    )
+    self.assertIsInstance(message.repeated_int32, collections.Iterable)
+    self.assertIsInstance(message.repeated_nested_message,
+                          collections.Iterable)
+
+    # Iterables have a "__iter__" method.
+    repeated_int32_iterator = iter(message.repeated_int32)
+    repeated_nested_message_iterator = iter(message.repeated_nested_message)
+    self.assertTupleEqual((4,5,6,), tuple(repeated_int32_iterator))
+    self.assertTupleEqual(
+        (
+            message_module.TestAllTypes.NestedMessage(bb=17),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=19),
+        ), tuple(repeated_nested_message_iterator))
+    self.assertTupleEqual((4,5,6,), tuple(message.repeated_int32))
+    self.assertTupleEqual(
+        (
+            message_module.TestAllTypes.NestedMessage(bb=17),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=19),
+        ), tuple(message.repeated_nested_message))
+
+  @unittest.skipIf(sys.version_info < (3,6,),
+                   'collections.Reversible was introduced in 3.6!')
+  def testRepeatedFieldsAreReversibles(self, message_module):
+    message = message_module.TestAllTypes(
+        repeated_int32=(4,5,6,),
+        repeated_nested_message=(
+            message_module.TestAllTypes.NestedMessage(bb=17),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=19),
+        )
+    )
+    self.assertIsInstance(message.repeated_int32, collections.Reversible)
+    self.assertIsInstance(
+        message.repeated_nested_message, collections.Reversible)
+
+    # Reversibles have a "__reversed__" method.
+    reversed_repeated_int32_iterator = reversed(message.repeated_int32)
+    reversed_repeated_nested_message_iterator = reversed(
+        message.repeated_nested_message)
+    self.assertTupleEqual((6,5,4,), tuple(reversed_repeated_int32_iterator))
+    self.assertTupleEqual(
+        (
+            message_module.TestAllTypes.NestedMessage(bb=19),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=17),
+        ), tuple(reversed_repeated_nested_message_iterator))
+    self.assertTupleEqual((4,5,6,), tuple(message.repeated_int32))
+    self.assertTupleEqual(
+        (
+            message_module.TestAllTypes.NestedMessage(bb=17),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=19),
+        ), tuple(message.repeated_nested_message))
+
+  def testRepeatedFieldsAreSizeds(self, message_module):
+    message = message_module.TestAllTypes(
+        repeated_int32=(4,5,6,),
+        repeated_nested_message=(
+            message_module.TestAllTypes.NestedMessage(bb=17),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=19),
+        )
+    )
+    self.assertIsInstance(message.repeated_int32, collections.Sized)
+    self.assertIsInstance(message.repeated_nested_message, collections.Sized)
+
+    # Sizeds have a "__len__" method.
+    self.assertEqual(3, len(message.repeated_int32))
+    self.assertEqual(3, len(message.repeated_nested_message))
+
+  def testRepeatedFieldsAreContainers(self, message_module):
+    message = message_module.TestAllTypes(
+        repeated_int32=(4,5,6,),
+        repeated_nested_message=(
+            message_module.TestAllTypes.NestedMessage(bb=17),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=19),
+        )
+    )
+    self.assertIsInstance(message.repeated_int32, collections.Container)
+    self.assertIsInstance(
+        message.repeated_nested_message, collections.Container)
+
+    # Containerss have a "__contains__" method.
+    self.assertIn(5, message.repeated_int32)
+    self.assertNotIn(27, message.repeated_int32)
+    self.assertIn(
+        message_module.TestAllTypes.NestedMessage(bb=19),
+        message.repeated_nested_message)
+    self.assertNotIn(
+        message_module.TestAllTypes.NestedMessage(bb=20),
+        message.repeated_nested_message)
+
+  @unittest.skipIf(sys.version_info < (3,6,),
+                   'collections.Collection was introduced in 3.6!')
+  def testRepeatedFieldsAreCollections(self, message_module):
+    message = message_module.TestAllTypes(repeated_int32=(3,5,7,))
+    self.assertIsInstance(message.repeated_int32, collections.Collection)
+    self.assertIsInstance(
+        message.repeated_nested_message, collections.Collection)
+
   def testRepeatedFieldsAreSequences(self, message_module):
-    m = message_module.TestAllTypes()
-    self.assertIsInstance(m.repeated_int32, collections.MutableSequence)
-    self.assertIsInstance(m.repeated_nested_message,
+    message = message_module.TestAllTypes(
+        repeated_int32=(4,5,6,4,5,6,4,5,),
+        repeated_nested_message=(
+            message_module.TestAllTypes.NestedMessage(bb=17),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=19),
+            message_module.TestAllTypes.NestedMessage(bb=19),
+        )
+    )
+    self.assertIsInstance(message.repeated_int32, collections.Sequence)
+    self.assertIsInstance(
+        message.repeated_nested_message, collections.Sequence)
+
+    # Sequences have a "__getitem__" method.
+    self.assertEqual(5, message.repeated_int32[1])
+    self.assertEqual(
+        message_module.TestAllTypes.NestedMessage(bb=19),
+        message.repeated_nested_message[2])
+    self.assertEqual(4, message.repeated_int32[-8])
+    self.assertEqual(
+        message_module.TestAllTypes.NestedMessage(bb=19),
+        message.repeated_nested_message[-1])
+    with self.assertRaises(IndexError):
+      message.repeated_int32[-333]
+    with self.assertRaises(IndexError):
+      message.repeated_int32[444]
+    with self.assertRaises(IndexError):
+      message.repeated_nested_message[-555]
+    with self.assertRaises(IndexError):
+      message.repeated_nested_message[666]
+
+    # Sequences have an "index" method.
+    self.assertEqual(0, message.repeated_int32.index(4))
+    with self.assertRaises(ValueError):
+      message.repeated_int32.index(15)
+    self.assertEqual(
+        1,
+        message.repeated_nested_message.index(
+            message_module.TestAllTypes.NestedMessage(bb=18)))
+    with self.assertRaises(ValueError):
+      message.repeated_nested_message.index(
+          message_module.TestAllTypes.NestedMessage(bb=16))
+    if (3,5,) <= sys.version_info:
+      # The start and stop parameters were only added in 3.5.
+      self.assertEqual(4, message.repeated_int32.index(5, start=2))
+      self.assertEqual(7, message.repeated_int32.index(5, start=5))
+      self.assertEqual(4, message.repeated_int32.index(5, start=-6))
+      self.assertEqual(1, message.repeated_int32.index(5, start=-555))
+      with self.assertRaises(ValueError):
+        message.repeated_int32.index(5, start=8)
+      with self.assertRaises(ValueError):
+        message.repeated_int32.index(5, start=333)
+      self.assertEqual(1, message.repeated_int32.index(5, stop=2))
+      self.assertEqual(1, message.repeated_int32.index(5, stop=444))
+      with self.assertRaises(ValueError):
+        message.repeated_int32.index(5, stop=1)
+      with self.assertRaises(ValueError):
+        message.repeated_int32.index(4, stop=-9)
+      self.assertEqual(4, message.repeated_int32.index(5, start=2, stop=None))
+      with self.assertRaises(ValueError):
+        message.repeated_int32.index(5, start=2, stop=3)
+      with self.assertRaises(ValueError):
+        message.repeated_int32.index(5, start=2, stop=-5)
+      with self.assertRaises(ValueError):
+        message.repeated_int32.index(4, stop=-9)
+      self.assertEqual(
+          3,
+          message.repeated_nested_message.index(
+              message_module.TestAllTypes.NestedMessage(bb=19), start=3))
+      self.assertEqual(
+          2,
+          message.repeated_nested_message.index(
+              message_module.TestAllTypes.NestedMessage(bb=19), start=1))
+      self.assertEqual(
+          3,
+          message.repeated_nested_message.index(
+              message_module.TestAllTypes.NestedMessage(bb=19), start=-1))
+      self.assertEqual(
+          1,
+          message.repeated_nested_message.index(
+              message_module.TestAllTypes.NestedMessage(bb=18), start=-777))
+      with self.assertRaises(ValueError):
+        message.repeated_nested_message.index(
+            message_module.TestAllTypes.NestedMessage(bb=17), start=1)
+      with self.assertRaises(ValueError):
+        message.repeated_nested_message.index(
+            message_module.TestAllTypes.NestedMessage(bb=19), stop=2)
+      self.assertEqual(
+          3,
+          message.repeated_nested_message.index(
+              message_module.TestAllTypes.NestedMessage(bb=19), start=3,
+              stop=None))
+
+    # Sequences have a "count" method.
+    self.assertEqual(3, message.repeated_int32.count(4))
+    self.assertEqual(2, message.repeated_int32.count(6))
+    self.assertEqual(0, message.repeated_int32.count(-33))
+    self.assertEqual(
+        1,
+        message.repeated_nested_message.count(
+            message_module.TestAllTypes.NestedMessage(bb=18)))
+    self.assertEqual(
+        2,
+        message.repeated_nested_message.count(
+            message_module.TestAllTypes.NestedMessage(bb=19)))
+    self.assertEqual(
+        0,
+        message.repeated_nested_message.count(
+            message_module.TestAllTypes.NestedMessage(bb=20)))
+
+  def testRepeatedFieldsAreMutableSequences(self, message_module):
+    message = message_module.TestAllTypes(
+        repeated_int32=(4,5,6,),
+        repeated_nested_message=(
+            message_module.TestAllTypes.NestedMessage(bb=17),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=19),
+        )
+    )
+    self.assertIsInstance(message.repeated_int32, collections.MutableSequence)
+    self.assertIsInstance(message.repeated_nested_message,
                           collections.MutableSequence)
+
+    # MutableSequences have a "__setitem__" method.
+    message.repeated_int32[2] = 7
+    message.repeated_int32[-3] = 3
+    message.repeated_nested_message[0] = (
+        message_module.TestAllTypes.NestedMessage(bb=16))
+    message.repeated_nested_message[-1] = (
+        message_module.TestAllTypes.NestedMessage(bb=20))
+    self.assertEqual(7, message.repeated_int32[2])
+    self.assertEqual(3, message.repeated_int32[0])
+    self.assertEqual(message_module.TestAllTypes.NestedMessage(bb=16),
+                     message.repeated_nested_message[0])
+    self.assertEqual(message_module.TestAllTypes.NestedMessage(bb=20),
+                     message.repeated_nested_message[2])
+    with self.assertRaises(IndexError):
+      message.repeated_int32[3] = 15
+    with self.assertRaises(IndexError):
+      message.repeated_int32[-4] = 14
+    with self.assertRaises(IndexError):
+      message.repeated_nested_message[3] = (
+          message_module.TestAllTypes.NestedMessage(bb=333))
+    with self.assertRaises(IndexError):
+      message.repeated_nested_message[-4] = (
+          message_module.TestAllTypes.NestedMessage(bb=444))
+
+    # MutableSequences have a "__delitem__" method.
+    del message.repeated_int32[1]
+    del message.repeated_nested_message[1]
+    self.assertTupleEqual((3,7,), tuple(message.repeated_int32))
+    self.assertTupleEqual(
+        (
+            message_module.TestAllTypes.NestedMessage(bb=16),
+            message_module.TestAllTypes.NestedMessage(bb=20),
+        ), tuple(message.repeated_nested_message))
+
+    # MutableSequences have an "insert" method.
+    message.repeated_int32.insert(1, 5)
+    message.repeated_int32.insert(0, 1)
+    message.repeated_int32.insert(4, 9)
+    message.repeated_int32.insert(-444, -1)
+    message.repeated_int32.insert(555, 11)
+    message.repeated_nested_message.insert(
+        0, message_module.TestAllTypes.NestedMessage(bb=14))
+    message.repeated_nested_message.insert(
+        4, message_module.TestAllTypes.NestedMessage(bb=22))
+    message.repeated_nested_message.insert(
+        2, message_module.TestAllTypes.NestedMessage(bb=18))
+    message.repeated_nested_message.insert(
+        -222, message_module.TestAllTypes.NestedMessage(bb=12))
+    message.repeated_nested_message.insert(
+        333, message_module.TestAllTypes.NestedMessage(bb=24))
+    self.assertTupleEqual((-1,1,3,5,7,9,11,), tuple(message.repeated_int32))
+    self.assertTupleEqual(
+        (
+            message_module.TestAllTypes.NestedMessage(bb=12),
+            message_module.TestAllTypes.NestedMessage(bb=14),
+            message_module.TestAllTypes.NestedMessage(bb=16),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=20),
+            message_module.TestAllTypes.NestedMessage(bb=22),
+            message_module.TestAllTypes.NestedMessage(bb=24),
+        ), tuple(message.repeated_nested_message))
+
+    # MutableSequences have an "append" method.
+    message.repeated_int32.append(7)
+    message.repeated_nested_message.append(
+        message_module.TestAllTypes.NestedMessage(bb=20))
+    self.assertTupleEqual((-1,1,3,5,7,9,11,7,), tuple(message.repeated_int32))
+    self.assertTupleEqual(
+        (
+            message_module.TestAllTypes.NestedMessage(bb=12),
+            message_module.TestAllTypes.NestedMessage(bb=14),
+            message_module.TestAllTypes.NestedMessage(bb=16),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=20),
+            message_module.TestAllTypes.NestedMessage(bb=22),
+            message_module.TestAllTypes.NestedMessage(bb=24),
+            message_module.TestAllTypes.NestedMessage(bb=20),
+        ), tuple(message.repeated_nested_message))
+
+    # MutableSequences have a "clear" method.
+    message.repeated_int32.clear()
+    message.repeated_nested_message.clear()
+    self.assertTupleEqual((), tuple(message.repeated_int32))
+    self.assertTupleEqual((), tuple(message.repeated_nested_message))
+
+    # MutableSequences have a "reverse" method.
+    message.repeated_int32.append(7)
+    message.repeated_int32.append(5)
+    message.repeated_int32.append(3)
+    message.repeated_nested_message.add(bb=20)
+    message.repeated_nested_message.add(bb=18)
+    message.repeated_nested_message.add(bb=16)
+    message.repeated_int32.reverse()
+    message.repeated_nested_message.reverse()
+    self.assertTupleEqual((3,5,7,), tuple(message.repeated_int32))
+    self.assertTupleEqual(
+        (
+            message_module.TestAllTypes.NestedMessage(bb=16),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=20),
+        ), tuple(message.repeated_nested_message))
+
+    # MutableSequences have an "extend" method.
+    message.repeated_int32.extend(iter([9,11,13,]))
+    message.repeated_nested_message.extend(
+        (message_module.TestAllTypes.NestedMessage(bb=22),))
+    self.assertTupleEqual((3,5,7,9,11,13,), tuple(message.repeated_int32))
+    self.assertTupleEqual(
+        (
+            message_module.TestAllTypes.NestedMessage(bb=16),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+            message_module.TestAllTypes.NestedMessage(bb=20),
+            message_module.TestAllTypes.NestedMessage(bb=22),
+        ), tuple(message.repeated_nested_message))
+
+    # MutableSequences have a "pop" method.
+    first_scalar_pop = message.repeated_int32.pop(2)
+    second_scalar_pop = message.repeated_int32.pop()
+    first_message_pop = message.repeated_nested_message.pop(2)
+    second_message_pop = message.repeated_nested_message.pop()
+    self.assertEqual(7, first_scalar_pop)
+    self.assertEqual(13, second_scalar_pop)
+    self.assertTupleEqual((3,5,9,11,), tuple(message.repeated_int32))
+    self.assertEqual(
+        message_module.TestAllTypes.NestedMessage(bb=20), first_message_pop)
+    self.assertEqual(
+        message_module.TestAllTypes.NestedMessage(bb=22), second_message_pop)
+    self.assertTupleEqual(
+        (
+            message_module.TestAllTypes.NestedMessage(bb=16),
+            message_module.TestAllTypes.NestedMessage(bb=18),
+        ), tuple(message.repeated_nested_message))
+
+    # MutableSequences have a "remove" method.
+    message.repeated_int32.remove(11)
+    with self.assertRaises(ValueError):
+      message.repeated_int32.remove(14)
+    message.repeated_nested_message.remove(
+        message_module.TestAllTypes.NestedMessage(bb=16))
+    with self.assertRaises(ValueError):
+      message.repeated_nested_message.remove(
+          message_module.TestAllTypes.NestedMessage(bb=24601))
+    self.assertTupleEqual((3,5,9,), tuple(message.repeated_int32))
+    self.assertTupleEqual(
+        (message_module.TestAllTypes.NestedMessage(bb=18),),
+        tuple(message.repeated_nested_message))
+
+    # MutableSequences have an "__iadd__" method... but assignment of
+    # repeated attributes of messages is not currently allowed.
+    with self.assertRaises(AttributeError):
+      message.repeated_int32 += [11,13,15,]
+    with self.assertRaises(AttributeError):
+      message.repeated_nested_message += (
+          message_module.TestAllTypes.NestedMessage(bb=20),
+          message_module.TestAllTypes.NestedMessage(bb=22),
+          message_module.TestAllTypes.NestedMessage(bb=24),
+       )
+    self.assertTupleEqual((3,5,9,), tuple(message.repeated_int32))
+    self.assertTupleEqual(
+        (message_module.TestAllTypes.NestedMessage(bb=18),),
+      tuple(message.repeated_nested_message))
 
   def testRepeatedFieldsNotHashable(self, message_module):
     m = message_module.TestAllTypes()
@@ -2210,7 +2620,7 @@ class Proto3Test(BaseTestCase):
     msg.map_int32_int32[35] = 64
     msg.map_string_foreign_message['foo'].c = 5
     self.assertEqual(0, len(msg.FindInitializationErrors()))
- 
+
   @unittest.skipIf(sys.maxunicode == UCS2_MAXUNICODE,
                    'Skip for ucs2')
   def testStrictUtf8Check(self):
@@ -2296,7 +2706,7 @@ class ValidTypeNamesTest(BaseTestCase):
     # Parse <type 'module.class_name'> to extra 'some.name' as a string.
     tp_name = str(type(msg)).split("'")[1]
     valid_names = ('Repeated%sContainer' % base_name,
-                   'Repeated%sFieldContainer' % base_name)
+                   'Repeated%sFieldMutableSequence' % base_name,)
     self.assertTrue(any(tp_name.endswith(v) for v in valid_names),
                     '%r does end with any of %r' % (tp_name, valid_names))
 

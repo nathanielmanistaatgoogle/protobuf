@@ -39,12 +39,13 @@ are:
     includes groups and nested messages.
 """
 
-__author__ = 'petar@google.com (Petar Petrov)'
-
+import abc
 import collections
 import sys
 
-if sys.version_info[0] < 3:
+import six
+
+if six.PY2:
   # We would use collections.MutableMapping all the time, but in Python 2 it
   # doesn't define __slots__.  This causes two significant problems:
   #
@@ -182,9 +183,15 @@ else:
   MutableMapping = collections.MutableMapping
 
 
-class BaseContainer(object):
+class MutableSequence(object):
+  """Common sequence operations.
 
-  """Base container class."""
+  RepeatedScalarFieldMutableSequence and
+  RepeatedCompositeFieldMutableSequence only differ in how they accept new
+  elements into the sequence (the former doesn't type-check the new value
+  and the latter does) so this class implements the access and deletion
+  behaviors that they have in common.
+  """
 
   # Minimizes memory usage and disallows assignment to other attributes.
   __slots__ = ['_message_listener', '_values']
@@ -192,16 +199,16 @@ class BaseContainer(object):
   def __init__(self, message_listener):
     """
     Args:
-      message_listener: A MessageListener implementation.
-        The RepeatedScalarFieldContainer will call this object's
-        Modified() method when it is modified.
+      message_listener: A MessageListener implementation. The
+        MutableSequence will call this object's Modified() method when it is
+        modified.
     """
     self._message_listener = message_listener
     self._values = []
 
-  def __getitem__(self, key):
-    """Retrieves item by the specified key."""
-    return self._values[key]
+  def _delitem(self, key):
+    del self._values[key]
+    self._message_listener.Modified()
 
   def __len__(self):
     """Returns the number of elements in the container."""
@@ -209,14 +216,46 @@ class BaseContainer(object):
 
   def __ne__(self, other):
     """Checks if another instance isn't equal to this one."""
-    # The concrete classes should define __eq__.
     return not self == other
+
+  def __eq__(self, other):
+    """Compares the current instance with another object."""
+    if self is other:
+      return True
+    elif isinstance(other, (self.__class__,)):
+      return self._values == other._values
+    elif isinstance(other, (collections.MutableSequence,)):
+      return self._values == list(other)
+    else:
+      return False
 
   def __hash__(self):
     raise TypeError('unhashable object')
 
+  def __iadd__(self, values):
+    raise AttributeError(
+        'Assignment not allowed to repeated field in protocol message object!')
+
   def __repr__(self):
     return repr(self._values)
+
+  def __getitem__(self, index):
+    """Retrieves element at the specified index."""
+    return self._values[index]
+
+  def __getslice__(self, start, stop):
+    """Retrieves the subset of elements from between the specified indices."""
+    return self._values[start:stop]
+
+  def __delitem__(self, key):
+    """Deletes the element at the specified position."""
+    self._delitem(key)
+
+  def __delslice__(self, start, stop):
+    """Deletes the subset of elements from between the specified indices."""
+    if start != stop:
+      del self._values[start:stop]
+      self._message_listener.Modified()
 
   def sort(self, *args, **kwargs):
     # Continue to support the old sort_function keyword argument.
@@ -226,9 +265,26 @@ class BaseContainer(object):
       kwargs['cmp'] = kwargs.pop('sort_function')
     self._values.sort(*args, **kwargs)
 
+  def clear(self):
+    """Removes all elements from the sequence."""
+    if self._values:
+      del self._values[:]
+      self._message_listener.Modified()
 
-class RepeatedScalarFieldContainer(BaseContainer):
+  def remove(self, value):
+    """Removes an element from the sequence."""
+    self._values.remove(value)
+    self._message_listener.Modified()
 
+  def pop(self, key=-1):
+    """Removes and returns an element at a given index."""
+    value = self._values[key]
+    self._delitem(key)
+    return value
+
+
+class RepeatedScalarFieldMutableSequence(
+    MutableSequence, collections.MutableSequence):
   """Simple, type-checked, list-like container for holding repeated scalars."""
 
   # Disallows assignment to other attributes.
@@ -238,12 +294,12 @@ class RepeatedScalarFieldContainer(BaseContainer):
     """
     Args:
       message_listener: A MessageListener implementation.
-        The RepeatedScalarFieldContainer will call this object's
+        The RepeatedScalarFieldMutableSequence will call this object's
         Modified() method when it is modified.
       type_checker: A type_checkers.ValueChecker instance to run on elements
         inserted into this container.
     """
-    super(RepeatedScalarFieldContainer, self).__init__(message_listener)
+    super(RepeatedScalarFieldMutableSequence, self).__init__(message_listener)
     self._type_checker = type_checker
 
   def append(self, value):
@@ -284,17 +340,6 @@ class RepeatedScalarFieldContainer(BaseContainer):
     self._values.extend(other._values)
     self._message_listener.Modified()
 
-  def remove(self, elem):
-    """Removes an item from the list. Similar to list.remove()."""
-    self._values.remove(elem)
-    self._message_listener.Modified()
-
-  def pop(self, key=-1):
-    """Removes and returns an item at a given index. Similar to list.pop()."""
-    value = self._values[key]
-    self.__delitem__(key)
-    return value
-
   def __setitem__(self, key, value):
     """Sets the item on the specified position."""
     if isinstance(key, slice):  # PY3
@@ -305,10 +350,6 @@ class RepeatedScalarFieldContainer(BaseContainer):
       self._values[key] = self._type_checker.CheckValue(value)
       self._message_listener.Modified()
 
-  def __getslice__(self, start, stop):
-    """Retrieves the subset of items from between the specified indices."""
-    return self._values[start:stop]
-
   def __setslice__(self, start, stop, values):
     """Sets the subset of items from between the specified indices."""
     new_values = []
@@ -317,31 +358,9 @@ class RepeatedScalarFieldContainer(BaseContainer):
     self._values[start:stop] = new_values
     self._message_listener.Modified()
 
-  def __delitem__(self, key):
-    """Deletes the item at the specified position."""
-    del self._values[key]
-    self._message_listener.Modified()
 
-  def __delslice__(self, start, stop):
-    """Deletes the subset of items from between the specified indices."""
-    del self._values[start:stop]
-    self._message_listener.Modified()
-
-  def __eq__(self, other):
-    """Compares the current instance with another one."""
-    if self is other:
-      return True
-    # Special case for the same type which should be common and fast.
-    if isinstance(other, self.__class__):
-      return other._values == self._values
-    # We are presumably comparing against some other sequence type.
-    return other == self._values
-
-collections.MutableSequence.register(BaseContainer)
-
-
-class RepeatedCompositeFieldContainer(BaseContainer):
-
+class RepeatedCompositeFieldMutableSequence(
+    MutableSequence, collections.MutableSequence):
   """Simple, list-like container for holding repeated composite fields."""
 
   # Disallows assignment to other attributes.
@@ -350,20 +369,37 @@ class RepeatedCompositeFieldContainer(BaseContainer):
   def __init__(self, message_listener, message_descriptor):
     """
     Note that we pass in a descriptor instead of the generated directly,
-    since at the time we construct a _RepeatedCompositeFieldContainer we
+    since at the time we construct a _RepeatedCompositeFieldMutableSequence we
     haven't yet necessarily initialized the type that will be contained in the
     container.
 
     Args:
       message_listener: A MessageListener implementation.
-        The RepeatedCompositeFieldContainer will call this object's
+        The RepeatedCompositeFieldMutableSequence will call this object's
         Modified() method when it is modified.
       message_descriptor: A Descriptor instance describing the protocol type
         that should be present in this container.  We'll use the
         _concrete_class field of this descriptor when the client calls add().
     """
-    super(RepeatedCompositeFieldContainer, self).__init__(message_listener)
+    super(RepeatedCompositeFieldMutableSequence, self).__init__(message_listener)
     self._message_descriptor = message_descriptor
+
+  def __setitem__(self, index, value):
+    if -len(self._values) <= index < len(self._values):
+      new_message = self._message_descriptor._concrete_class()
+      new_message._SetListener(self._message_listener)
+      new_message.MergeFrom(value)
+      self._values[index] = new_message
+      self._message_listener.Modified()
+    else:
+      raise IndexError(
+          'Index %d out of range (0 through %d)' % (index, len(self._values,)))
+
+  def insert(self, index, value):
+    new_message = self._message_descriptor._concrete_class()
+    new_message._SetListener(self._message_listener)
+    new_message.MergeFrom(value)
+    self._values.insert(index, new_message)
 
   def add(self, **kwargs):
     """Adds a new element at the end of the list and returns it. Keyword
@@ -395,40 +431,6 @@ class RepeatedCompositeFieldContainer(BaseContainer):
     one, copying each individual message.
     """
     self.extend(other._values)
-
-  def remove(self, elem):
-    """Removes an item from the list. Similar to list.remove()."""
-    self._values.remove(elem)
-    self._message_listener.Modified()
-
-  def pop(self, key=-1):
-    """Removes and returns an item at a given index. Similar to list.pop()."""
-    value = self._values[key]
-    self.__delitem__(key)
-    return value
-
-  def __getslice__(self, start, stop):
-    """Retrieves the subset of items from between the specified indices."""
-    return self._values[start:stop]
-
-  def __delitem__(self, key):
-    """Deletes the item at the specified position."""
-    del self._values[key]
-    self._message_listener.Modified()
-
-  def __delslice__(self, start, stop):
-    """Deletes the subset of items from between the specified indices."""
-    del self._values[start:stop]
-    self._message_listener.Modified()
-
-  def __eq__(self, other):
-    """Compares the current instance with another one."""
-    if self is other:
-      return True
-    if not isinstance(other, self.__class__):
-      raise TypeError('Can only compare repeated composite fields against '
-                      'other repeated composite fields.')
-    return self._values == other._values
 
 
 class ScalarMap(MutableMapping):

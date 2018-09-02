@@ -448,13 +448,13 @@ def _DefaultValueConstructorForField(field):
       # been set.  (Depends on order in which we initialize the classes).
       message_type = field.message_type
       def MakeRepeatedMessageDefault(message):
-        return containers.RepeatedCompositeFieldContainer(
+        return containers.RepeatedCompositeFieldMutableSequence(
             message._listener_for_children, field.message_type)
       return MakeRepeatedMessageDefault
     else:
       type_checker = type_checkers.GetTypeChecker(field)
       def MakeRepeatedScalarDefault(message):
-        return containers.RepeatedScalarFieldContainer(
+        return containers.RepeatedScalarFieldMutableSequence(
             message._listener_for_children, type_checker)
       return MakeRepeatedScalarDefault
 
@@ -641,8 +641,8 @@ class _FieldProperty(property):
 def _AddPropertiesForRepeatedField(field, cls):
   """Adds a public property for a "repeated" protocol message field.  Clients
   can use this property to get the value of the field, which will be either a
-  _RepeatedScalarFieldContainer or _RepeatedCompositeFieldContainer (see
-  below).
+  containers.RepeatedScalarFieldMutableSequence or
+  containers.RepeatedCompositeFieldMutableSequence (see below).
 
   Note that when clients add values to these containers, we perform
   type-checking in the case of repeated scalar fields, and we also set any
